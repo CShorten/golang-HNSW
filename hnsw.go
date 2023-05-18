@@ -77,11 +77,11 @@ func (h *HNSW) searchLayer(q interface{}, ep int, ef int, layerNum int) []int {
 	// Initialize candidates and dynamicNearestNeighborsList
 	candidates := &distanceHeap{}
 	heap.Init(candidates)
-	heap.Push(candidates, &distanceNode{-h.distance(ep, q), ep})
+	heap.Push(candidates, &distanceNode{-h.distance(ep, q), ep, candidates.Len()})
 
 	dynamicNearestNeighborsList := &distanceHeap{}
 	heap.Init(dynamicNearestNeighborsList)
-	heap.Push(dynamicNearestNeighborsList, &distanceNode{-math.Inf(1), ep})
+	heap.Push(dynamicNearestNeighborsList, &distanceNode{-math.Inf(1), ep, dynamicNearestNeighborsList.Len()})
 
 	for candidates.Len() > 0 {
 		nearest := heap.Pop(candidates).(*distanceNode)
@@ -102,8 +102,8 @@ func (h *HNSW) searchLayer(q interface{}, ep int, ef int, layerNum int) []int {
 				heap.Push(dynamicNearestNeighborsList, furthest)
 
 				if distanceE < -furthest.distance || dynamicNearestNeighborsList.Len() < ef {
-					heap.Push(candidates, &distanceNode{-distanceE, e})
-					heap.Push(dynamicNearestNeighborsList, &distanceNode{-distanceE, e})
+					heap.Push(candidates, &distanceNode{-distanceE, e, candidates.Len()})
+					heap.Push(dynamicNearestNeighborsList, &distanceNode{-distanceE, e, dynamicNearestNeighborsList.Len()})
 					if dynamicNearestNeighborsList.Len() > ef {
 						heap.Pop(dynamicNearestNeighborsList)
 					}
@@ -239,7 +239,7 @@ func (h *HNSW) selectNeighborsHeuristic(qID int, C []int, M int, lc int, extendC
 
 	// Populate working queue with initial candidates and their distances to query
 	for _, e := range C {
-		heap.Push(W, &distanceNode{h.distance(qID, e), e})
+		heap.Push(W, &distanceNode{h.distance(qID, e), e, W.Len()})
 	}
 
 	// Extend candidates by their neighbors
@@ -247,7 +247,7 @@ func (h *HNSW) selectNeighborsHeuristic(qID int, C []int, M int, lc int, extendC
 		for _, e := range C {
 			for _, eAdj := range h.graph[lc][e] {
 				if !W.contains(eAdj) {
-					heap.Push(W, &distanceNode{h.distance(qID, eAdj), eAdj})
+					heap.Push(W, &distanceNode{h.distance(qID, eAdj), eAdj, W.Len()})
 				}
 			}
 		}
@@ -352,6 +352,7 @@ func (h *HNSW) search(q []float64, K int, ef int) []int {
 type distanceNode struct {
 	distance float64
 	id       int
+	index    int // add this field to keep track of the index in the heap
 }
 
 // distanceHeap is a min-heap of distanceNodes
@@ -359,10 +360,16 @@ type distanceHeap []*distanceNode
 
 func (h distanceHeap) Len() int           { return len(h) }
 func (h distanceHeap) Less(i, j int) bool { return h[i].distance < h[j].distance }
-func (h distanceHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h distanceHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+	h[i].index = i
+	h[j].index = j
+}
 
 func (h *distanceHeap) Push(x interface{}) {
+	n := len(*h)
 	item := x.(*distanceNode)
+	item.index = n
 	*h = append(*h, item)
 }
 
@@ -370,7 +377,7 @@ func (h *distanceHeap) Pop() interface{} {
 	old := *h
 	n := len(old)
 	item := old[n-1]
-	old[n-1] = nil // avoid memory leak
+	item.index = -1 // for safety
 	*h = old[0 : n-1]
 	return item
 }
